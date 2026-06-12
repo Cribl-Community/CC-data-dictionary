@@ -34,3 +34,70 @@ export async function fetchPipelines(groupId: string): Promise<Pipeline[]> {
   const data = await apiFetch<{ items: Pipeline[] }>(`/m/${groupId}/pipelines`);
   return data.items;
 }
+
+export interface CaptureParams {
+  // Stage to capture at. 0=before pre-proc pipeline, 1=before routes,
+  // 2=before post-proc pipeline, 3=before the destination.
+  level: number;
+  filter?: string;
+  duration?: number;
+  maxEvents?: number;
+}
+
+export type CapturedEvent = Record<string, unknown>;
+
+// Live-tap captured events from a worker group. The endpoint streams NDJSON;
+// we parse line-by-line and report progress via onProgress. The server closes
+// the stream after `duration` seconds or `maxEvents`, whichever comes first.
+export async function captureEvents(
+  groupId: string,
+  params: CaptureParams,
+  onProgress?: (count: number) => void,
+  signal?: AbortSignal
+): Promise<CapturedEvent[]> {
+  const res = await fetch(`${getApiUrl()}/m/${groupId}/system/capture`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+    signal,
+  });
+  if (res.status === 400) {
+    throw new Error('No worker nodes are connected to this group, so there is nothing to capture.');
+  }
+  if (!res.ok || !res.body) {
+    throw new Error(`Capture failed (${res.status})`);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  const events: CapturedEvent[] = [];
+  let buffer = '';
+
+  const pushLine = (line: string) => {
+    const trimmed = line.trim();
+    if (!trimmed) return;
+    try {
+      const obj = JSON.parse(trimmed);
+      // Cribl capture lines are sometimes wrapped as { event: {...} }.
+      const event = obj && typeof obj === 'object' && 'event' in obj ? obj.event : obj;
+      events.push(event as CapturedEvent);
+      onProgress?.(events.length);
+    } catch {
+      // Ignore keep-alive / non-JSON lines.
+    }
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let nl: number;
+    while ((nl = buffer.indexOf('\n')) >= 0) {
+      pushLine(buffer.slice(0, nl));
+      buffer = buffer.slice(nl + 1);
+    }
+  }
+  pushLine(buffer);
+
+  return events;
+}

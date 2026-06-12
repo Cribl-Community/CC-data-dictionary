@@ -471,3 +471,183 @@ body {
 .save-indicator.error {
   color: #ff4d4f;
 }
+
+/* Field Explorer */
+.field-explorer-section {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #f0f0f0;
+}
+
+.field-explorer-btn {
+  padding: 6px 14px;
+  background: #f0f5ff;
+  color: #1890ff;
+  border: 1px solid #adc6ff;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.field-explorer-btn:hover {
+  background: #d6e4ff;
+}
+
+.field-explorer-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.field-explorer-controls label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #595959;
+}
+
+.field-explorer-controls select,
+.field-explorer-controls input {
+  padding: 5px 8px;
+  border: 1px solid #d9d9d9;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.field-explorer-controls input[type='number'] {
+  width: 80px;
+}
+
+.capture-btn {
+  padding: 6px 16px;
+  background: #1890ff;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.capture-btn:hover {
+  background: #096dd9;
+}
+
+.capture-btn.stop {
+  background: #ff4d4f;
+}
+
+.capture-btn.stop:hover {
+  background: #d9363e;
+}
+
+.capture-status {
+  font-size: 13px;
+  color: #1890ff;
+  padding: 6px 0;
+}
+
+.capture-error {
+  font-size: 13px;
+  color: #ff4d4f;
+  padding: 8px 12px;
+  background: #fff1f0;
+  border: 1px solid #ffccc7;
+  border-radius: 4px;
+}
+
+.field-results-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 600;
+  color: #595959;
+  margin-bottom: 8px;
+}
+
+.internal-toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-weight: 400;
+  cursor: pointer;
+}
+
+.field-empty {
+  font-size: 13px;
+  color: #8c8c8c;
+  padding: 12px;
+  text-align: center;
+}
+
+.field-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.field-table th {
+  text-align: left;
+  padding: 6px 10px;
+  color: #8c8c8c;
+  font-weight: 600;
+  border-bottom: 1px solid #e8e8e8;
+}
+
+.field-table td {
+  padding: 6px 10px;
+  border-bottom: 1px solid #f5f5f5;
+  vertical-align: top;
+}
+
+.field-name {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-weight: 600;
+  color: #1a1a2e;
+}
+
+.field-type {
+  color: #722ed1;
+  white-space: nowrap;
+}
+
+.field-fill {
+  position: relative;
+  width: 120px;
+  white-space: nowrap;
+}
+
+.fill-bar {
+  display: inline-block;
+  height: 8px;
+  background: #91d5ff;
+  border-radius: 2px;
+  vertical-align: middle;
+  min-width: 2px;
+}
+
+.fill-pct {
+  margin-left: 6px;
+  color: #595959;
+}
+
+.field-sample code {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  color: #fa8c16;
+  word-break: break-all;
+}
+
+.internal-field {
+  opacity: 0.6;
+}
+
+.internal-field .field-name {
+  color: #8c8c8c;
+}

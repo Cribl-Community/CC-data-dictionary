@@ -1,8 +1,18 @@
-import { useEffect, useState, useCallback } from 'react';
-import { loadGroupDataDictionary } from './dataPathBuilder';
+import { useEffect, useState, useCallback, useRef } from 'react';
+import { loadGroupDataDictionary, buildCaptureFilter } from './dataPathBuilder';
 import { loadMetadata, saveMetadata, getPathKey } from './metadata';
+import { captureEvents } from './api';
+import { analyzeFields } from './fieldAnalysis';
+import type { FieldStat } from './fieldAnalysis';
 import type { GroupDataDictionary, DataPath } from './types';
 import type { MetadataStore, DataPathMetadata } from './metadata';
+
+// Capture stages exposed by the Field Explorer (Cribl capture `level`).
+const CAPTURE_LEVELS: { value: number; label: string }[] = [
+  { value: 1, label: 'Before Routes' },
+  { value: 2, label: 'Before Post-Processing Pipeline' },
+  { value: 3, label: 'Before Destination' },
+];
 
 // Stable key for a data path. Source-specific routes key on the source id;
 // content/catch-all routes have no source, so key on the displayed source slot.
@@ -112,12 +122,133 @@ function MetadataEditor({
   );
 }
 
+function FieldExplorer({ groupId, path }: { groupId: string; path: DataPath }) {
+  const [level, setLevel] = useState(3);
+  const [duration, setDuration] = useState(10);
+  const [maxEvents, setMaxEvents] = useState(100);
+  const [running, setRunning] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [fields, setFields] = useState<FieldStat[] | null>(null);
+  const [sampleSize, setSampleSize] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+  const [showInternal, setShowInternal] = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
+
+  async function runCapture() {
+    setRunning(true);
+    setError(null);
+    setProgress(0);
+    setFields(null);
+    const controller = new AbortController();
+    abortRef.current = controller;
+    try {
+      const events = await captureEvents(
+        groupId,
+        { level, filter: buildCaptureFilter(path), duration, maxEvents },
+        count => setProgress(count),
+        controller.signal
+      );
+      setSampleSize(events.length);
+      setFields(analyzeFields(events));
+    } catch (e) {
+      if (!controller.signal.aborted) {
+        setError(e instanceof Error ? e.message : 'Capture failed');
+      }
+    } finally {
+      setRunning(false);
+      abortRef.current = null;
+    }
+  }
+
+  function stopCapture() {
+    abortRef.current?.abort();
+    setRunning(false);
+  }
+
+  const visibleFields = fields?.filter(f => showInternal || !f.internal) ?? [];
+  const internalCount = fields?.filter(f => f.internal).length ?? 0;
+
+  return (
+    <div className="field-explorer">
+      <div className="field-explorer-controls">
+        <label>
+          Capture at
+          <select value={level} onChange={e => setLevel(Number(e.target.value))} disabled={running}>
+            {CAPTURE_LEVELS.map(l => (
+              <option key={l.value} value={l.value}>{l.label}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Duration (s)
+          <input
+            type="number" min={1} max={60} value={duration}
+            onChange={e => setDuration(Number(e.target.value))} disabled={running}
+          />
+        </label>
+        <label>
+          Max events
+          <input
+            type="number" min={1} max={1000} value={maxEvents}
+            onChange={e => setMaxEvents(Number(e.target.value))} disabled={running}
+          />
+        </label>
+        {running ? (
+          <button className="capture-btn stop" onClick={stopCapture}>Stop ({progress})</button>
+        ) : (
+          <button className="capture-btn" onClick={runCapture}>Run Capture</button>
+        )}
+      </div>
+
+      {running && <div className="capture-status">Capturing… {progress} events</div>}
+      {error && <div className="capture-error">{error}</div>}
+
+      {fields && !running && (
+        <div className="field-results">
+          <div className="field-results-header">
+            <span>{visibleFields.length} fields from {sampleSize} events</span>
+            {internalCount > 0 && (
+              <label className="internal-toggle">
+                <input type="checkbox" checked={showInternal} onChange={e => setShowInternal(e.target.checked)} />
+                Show {internalCount} internal (__) fields
+              </label>
+            )}
+          </div>
+          {sampleSize === 0 ? (
+            <div className="field-empty">No events captured. Try a longer duration or an earlier stage.</div>
+          ) : (
+            <table className="field-table">
+              <thead>
+                <tr><th>Field</th><th>Type</th><th>Fill</th><th>Sample</th></tr>
+              </thead>
+              <tbody>
+                {visibleFields.map(f => (
+                  <tr key={f.name} className={f.internal ? 'internal-field' : ''}>
+                    <td className="field-name">{f.name}</td>
+                    <td className="field-type">{f.types.join(' | ')}</td>
+                    <td className="field-fill">
+                      <span className="fill-bar" style={{ width: `${Math.round(f.fillRate * 100)}%` }} />
+                      <span className="fill-pct">{Math.round(f.fillRate * 100)}%</span>
+                    </td>
+                    <td className="field-sample"><code>{f.sample ?? ''}</code></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DataPathCard({
   path,
   expanded,
   onToggle,
   metadata,
   pathKey,
+  groupId,
   onSaveMetadata,
 }: {
   path: DataPath;
@@ -125,9 +256,11 @@ function DataPathCard({
   onToggle: () => void;
   metadata: DataPathMetadata;
   pathKey: string;
+  groupId: string;
   onSaveMetadata: (key: string, meta: DataPathMetadata) => void;
 }) {
   const displayName = metadata.dataSourceLabel || path.dataType;
+  const [showExplorer, setShowExplorer] = useState(false);
 
   return (
     <div className={`data-path-card ${path.source?.disabled ? 'disabled-source' : ''}`}>
@@ -174,6 +307,16 @@ function DataPathCard({
               <code>{path.route.filter}</code>
             </div>
           )}
+
+          <div className="field-explorer-section">
+            {!showExplorer ? (
+              <button className="field-explorer-btn" onClick={() => setShowExplorer(true)}>
+                🔍 Field Explorer
+              </button>
+            ) : (
+              <FieldExplorer groupId={groupId} path={path} />
+            )}
+          </div>
         </div>
       )}
     </div>
@@ -443,6 +586,7 @@ function App() {
                     onToggle={() => togglePath(key)}
                     metadata={metadataStore[key] || {}}
                     pathKey={key}
+                    groupId={selectedGroup!.group.id}
                     onSaveMetadata={handleSaveMetadata}
                   />
                 );

@@ -18,6 +18,32 @@ function sourceMatchesConstraint(source: Source, constraint: string): boolean {
   return fullId === constraint;
 }
 
+/**
+ * Reconstruct a JS filter expression that scopes a live capture to the data
+ * flowing through a single data path. Combines the route's own filter with an
+ * __inputId clause when the route scopes by the `input` field rather than the
+ * filter text. Returns 'true' (match everything on this route) when there is no
+ * meaningful constraint to apply.
+ */
+export function buildCaptureFilter(path: DataPath): string {
+  const clauses: string[] = [];
+
+  // If the route scoped by the `input` field (not present in the filter text),
+  // add an __inputId clause so the capture only sees that source's events.
+  const route = path.route;
+  const filterHasInputId = route.filter ? /__inputId\s*={2,3}/.test(route.filter) : false;
+  if (route.input && !filterHasInputId) {
+    clauses.push(`__inputId=='${route.input}'`);
+  }
+
+  const trivial = !route.filter || ['true', '1', ''].includes(route.filter.trim());
+  if (route.filter && !trivial) {
+    clauses.push(`(${route.filter.trim()})`);
+  }
+
+  return clauses.length ? clauses.join(' && ') : 'true';
+}
+
 // Pull index / sourcetype qualifiers out of a route filter so we can describe
 // which slice of a source's data flows through the route. Handles == and ===,
 // single or double quotes, and multiple occurrences.
