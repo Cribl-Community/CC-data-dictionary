@@ -2,12 +2,27 @@ import type { WorkerGroup, Source, Destination, RoutesConfig, Pipeline } from '.
 
 const getApiUrl = () => window.CRIBL_API_URL || 'http://localhost:9000/api/v1';
 
+// The platform proxy hard-times-out at 30s; fail a bit earlier with a clear
+// message so a single slow endpoint doesn't hang the whole load.
+const REQUEST_TIMEOUT_MS = 25000;
+
 async function apiFetch<T>(path: string): Promise<T> {
-  const res = await fetch(`${getApiUrl()}${path}`);
-  if (!res.ok) {
-    throw new Error(`API error ${res.status}: ${path}`);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${getApiUrl()}${path}`, { signal: controller.signal });
+    if (!res.ok) {
+      throw new Error(`API error ${res.status}: ${path}`);
+    }
+    return res.json();
+  } catch (e) {
+    if (e instanceof DOMException && e.name === 'AbortError') {
+      throw new Error(`Request timed out: ${path}`, { cause: e });
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
   }
-  return res.json();
 }
 
 export async function fetchGroups(): Promise<WorkerGroup[]> {

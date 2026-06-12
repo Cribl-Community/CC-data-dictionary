@@ -1,10 +1,10 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { loadGroupDataDictionary, buildCaptureFilter } from './dataPathBuilder';
+import { loadGroups, loadGroupDataDictionary, buildCaptureFilter } from './dataPathBuilder';
 import { loadMetadata, saveMetadata, getPathKey } from './metadata';
 import { captureEvents } from './api';
 import { analyzeFields } from './fieldAnalysis';
 import type { FieldStat } from './fieldAnalysis';
-import type { GroupDataDictionary, DataPath } from './types';
+import type { GroupDataDictionary, DataPath, WorkerGroup } from './types';
 import type { MetadataStore, DataPathMetadata } from './metadata';
 
 // Capture stages exposed by the Field Explorer (Cribl capture `level`).
@@ -379,7 +379,9 @@ function groupPaths(
 }
 
 function App() {
-  const [data, setData] = useState<GroupDataDictionary[]>([]);
+  const [groups, setGroups] = useState<WorkerGroup[]>([]);
+  // Per-group dictionaries, loaded lazily on selection and cached.
+  const [dictCache, setDictCache] = useState<Record<string, GroupDataDictionary>>({});
   const [metadataStore, setMetadataStore] = useState<MetadataStore>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -390,29 +392,60 @@ function App() {
   const [groupByMode, setGroupByMode] = useState<GroupBy>('none');
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
 
-  useEffect(() => {
-    loadData();
-  }, []);
-
-  async function loadData() {
+  // Load the lightweight group list + metadata, then auto-select the first group.
+  // Runs once on mount; `loading` already starts true, so no synchronous
+  // setState is needed before the first await.
+  async function loadGroupList() {
     try {
-      setLoading(true);
-      setError(null);
-      const [results, meta] = await Promise.all([
-        loadGroupDataDictionary(),
-        loadMetadata(),
-      ]);
-      setData(results);
+      const [groupList, meta] = await Promise.all([loadGroups(), loadMetadata()]);
+      setGroups(groupList);
       setMetadataStore(meta);
-      if (results.length > 0 && !selectedGroupId) {
-        setSelectedGroupId(results[0].group.id);
+      if (groupList.length > 0) {
+        selectGroup(groupList[0]);
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load data');
+      setError(e instanceof Error ? e.message : 'Failed to load groups');
     } finally {
       setLoading(false);
     }
   }
+
+  // Tracks groups already loaded so we dedupe fetches across re-selections.
+  const loadedRef = useRef<Set<string>>(new Set());
+
+  // Fetch a single group's dictionary on demand. Takes the group object
+  // directly (no stale-closure over `groups`). `force` bypasses the cache.
+  const loadGroupData = useCallback(async (group: WorkerGroup, force = false) => {
+    if (!force && loadedRef.current.has(group.id)) return;
+    loadedRef.current.add(group.id);
+    try {
+      const dict = await loadGroupDataDictionary(group);
+      setDictCache(prev => ({ ...prev, [group.id]: dict }));
+      setError(null);
+    } catch (e) {
+      loadedRef.current.delete(group.id); // allow retry
+      setError(e instanceof Error ? e.message : `Failed to load group ${group.id}`);
+    }
+  }, []);
+
+  // Select a group and kick off its (lazy, cached) data load.
+  function selectGroup(group: WorkerGroup) {
+    setSelectedGroupId(group.id);
+    void loadGroupData(group);
+  }
+
+  function refresh() {
+    const group = groups.find(g => g.id === selectedGroupId);
+    if (group) void loadGroupData(group, true);
+  }
+
+  // Load the group list once on mount. loadGroupList's setState calls all run
+  // after an await (not synchronously), so the cascade rule is a false positive.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void loadGroupList();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleSaveMetadata = useCallback(async (key: string, meta: DataPathMetadata) => {
     const updated = { ...metadataStore, [key]: meta };
@@ -439,7 +472,8 @@ function App() {
     });
   }
 
-  const selectedGroup = data.find(g => g.group.id === selectedGroupId);
+  const selectedGroup = selectedGroupId ? dictCache[selectedGroupId] : undefined;
+  const groupLoading = !!selectedGroupId && !selectedGroup && !error;
 
   const filteredPaths = selectedGroup?.dataPaths.filter(path => {
     if (!showDisabled && path.disabled) return false;
@@ -477,12 +511,12 @@ function App() {
     );
   }
 
-  if (error) {
+  if (error && groups.length === 0) {
     return (
       <div className="page">
         <div className="error-box">
           <p>{error}</p>
-          <button onClick={loadData}>Retry</button>
+          <button onClick={loadGroupList}>Retry</button>
         </div>
       </div>
     );
@@ -499,9 +533,12 @@ function App() {
           <select
             className="group-select"
             value={selectedGroupId || ''}
-            onChange={e => setSelectedGroupId(e.target.value)}
+            onChange={e => {
+              const group = groups.find(g => g.id === e.target.value);
+              if (group) selectGroup(group);
+            }}
           >
-            {data.map(({ group }) => (
+            {groups.map(group => (
               <option key={group.id} value={group.id}>
                 {group.name || group.id}
               </option>
@@ -550,7 +587,7 @@ function App() {
               </button>
             </div>
           </div>
-          <button className="refresh-btn" onClick={loadData}>Refresh</button>
+          <button className="refresh-btn" onClick={refresh}>Refresh</button>
           {saveStatus === 'saving' && <span className="save-indicator saving">Saving...</span>}
           {saveStatus === 'saved' && <span className="save-indicator saved">Saved</span>}
           {saveStatus === 'error' && <span className="save-indicator error">Save failed</span>}
@@ -577,39 +614,53 @@ function App() {
         </div>
       )}
 
-      <section className="paths-section">
-        {filteredPaths.length === 0 ? (
-          <div className="empty">No matching data paths found.</div>
-        ) : (
-          grouped.map(group => (
-            <div key={group.label} className="path-group">
-              {groupByMode !== 'none' && (
-                <div className="path-group-header">
-                  <span className="path-group-title">{group.label}</span>
-                  <span className="path-group-count">{group.paths.length}</span>
-                </div>
-              )}
-              {group.paths.map((path, i) => {
-                const key = pathKeyOf(path);
-                return (
-                  <DataPathCard
-                    key={key + i}
-                    path={path}
-                    expanded={expandedPaths.has(key)}
-                    onToggle={() => togglePath(key)}
-                    metadata={metadataStore[key] || {}}
-                    pathKey={key}
-                    groupId={selectedGroup!.group.id}
-                    onSaveMetadata={handleSaveMetadata}
-                  />
-                );
-              })}
-            </div>
-          ))
-        )}
-      </section>
+      {error && groups.length > 0 && (
+        <div className="error-box inline">
+          <p>{error}</p>
+          <button onClick={refresh}>Retry</button>
+        </div>
+      )}
 
-      {data.length === 0 && (
+      {groupLoading ? (
+        <div className="loading">
+          <div className="spinner" />
+          <p>Loading {groups.find(g => g.id === selectedGroupId)?.name || 'group'}…</p>
+        </div>
+      ) : selectedGroup ? (
+        <section className="paths-section">
+          {filteredPaths.length === 0 ? (
+            <div className="empty">No matching data paths found.</div>
+          ) : (
+            grouped.map(group => (
+              <div key={group.label} className="path-group">
+                {groupByMode !== 'none' && (
+                  <div className="path-group-header">
+                    <span className="path-group-title">{group.label}</span>
+                    <span className="path-group-count">{group.paths.length}</span>
+                  </div>
+                )}
+                {group.paths.map((path, i) => {
+                  const key = pathKeyOf(path);
+                  return (
+                    <DataPathCard
+                      key={key + i}
+                      path={path}
+                      expanded={expandedPaths.has(key)}
+                      onToggle={() => togglePath(key)}
+                      metadata={metadataStore[key] || {}}
+                      pathKey={key}
+                      groupId={selectedGroup.group.id}
+                      onSaveMetadata={handleSaveMetadata}
+                    />
+                  );
+                })}
+              </div>
+            ))
+          )}
+        </section>
+      ) : null}
+
+      {groups.length === 0 && (
         <div className="empty">No worker groups found.</div>
       )}
     </div>

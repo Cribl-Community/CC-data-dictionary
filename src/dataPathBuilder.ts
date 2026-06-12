@@ -219,30 +219,32 @@ function buildDataPaths(
   return paths;
 }
 
-export async function loadGroupDataDictionary(): Promise<GroupDataDictionary[]> {
-  const groups = await fetchGroups();
+// List the worker groups only. Cheap, and lets the UI render the group
+// picker immediately without fetching every group's full config up front.
+export async function loadGroups(): Promise<WorkerGroup[]> {
+  return fetchGroups();
+}
 
-  const results = await Promise.all(
-    groups.map(async (group: WorkerGroup) => {
-      const [sources, destinations, routesConfig, pipelines] = await Promise.all([
-        fetchSources(group.id),
-        fetchDestinations(group.id),
-        fetchRoutes(group.id),
-        fetchPipelines(group.id),
-      ]);
+// Load the full data dictionary for a SINGLE group. The four config endpoints
+// are fetched in parallel. Loading one group at a time (on selection) instead
+// of all groups at once keeps the request fan-out small and avoids timeouts on
+// instances with many groups.
+export async function loadGroupDataDictionary(group: WorkerGroup): Promise<GroupDataDictionary> {
+  const [sources, destinations, routesConfig, pipelines] = await Promise.all([
+    fetchSources(group.id),
+    fetchDestinations(group.id),
+    fetchRoutes(group.id),
+    fetchPipelines(group.id),
+  ]);
 
-      const dataPaths = buildDataPaths(sources, destinations, routesConfig.routes, pipelines);
+  const dataPaths = buildDataPaths(sources, destinations, routesConfig.routes, pipelines);
 
-      return {
-        group,
-        sources,
-        destinations,
-        routes: routesConfig.routes,
-        pipelines,
-        dataPaths,
-      };
-    })
-  );
-
-  return results;
+  return {
+    group,
+    sources,
+    destinations,
+    routes: routesConfig.routes,
+    pipelines,
+    dataPaths,
+  };
 }

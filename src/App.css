@@ -168,6 +168,20 @@ body {
   border-radius: 6px;
 }
 
+.error-box.inline {
+  padding: 16px;
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.error-box.inline p {
+  margin-bottom: 0;
+  text-align: left;
+}
+
 .error-box p {
   color: #cf1322;
   margin-bottom: 12px;
