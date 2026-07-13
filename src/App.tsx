@@ -4,7 +4,7 @@ import { loadMetadata, saveMetadata, getPathKey } from './metadata';
 import { captureEvents } from './api';
 import { analyzeFields } from './fieldAnalysis';
 import type { FieldStat } from './fieldAnalysis';
-import type { GroupDataDictionary, DataPath, WorkerGroup } from './types';
+import type { GroupDataDictionary, DataPath, WorkerGroup, Health, GroupStatus } from './types';
 import type { MetadataStore, DataPathMetadata } from './metadata';
 
 // Capture stages exposed by the Field Explorer (Cribl capture `level`).
@@ -246,6 +246,73 @@ function FieldExplorer({ groupId, path }: { groupId: string; path: DataPath }) {
   );
 }
 
+const HEALTH_COLORS: Record<Health, string> = {
+  Green: '#52c41a',
+  Yellow: '#faad14',
+  Red: '#cf1322',
+  Unknown: '#bfbfbf',
+};
+
+function HealthDot({ health, title }: { health: Health; title?: string }) {
+  return (
+    <span
+      className="health-dot"
+      style={{ backgroundColor: HEALTH_COLORS[health] }}
+      title={title || `Health: ${health}`}
+    />
+  );
+}
+
+// Combine source + destination health into the worse of the two (Red > Yellow >
+// Green > Unknown), so the path dot reflects the weakest link.
+function worstHealth(a?: Health, b?: Health): Health {
+  const rank: Record<Health, number> = { Red: 3, Yellow: 2, Green: 1, Unknown: 0 };
+  const candidates = [a, b].filter(Boolean) as Health[];
+  if (candidates.length === 0) return 'Unknown';
+  return candidates.reduce((w, h) => (rank[h] > rank[w] ? h : w));
+}
+
+function CoverageBanner({ dict }: { dict: GroupDataDictionary }) {
+  const [open, setOpen] = useState(false);
+  const { orphanedSources, unusedDestinations } = dict.coverage;
+  const total = orphanedSources.length + unusedDestinations.length;
+  if (total === 0) return null;
+
+  return (
+    <div className="coverage-banner">
+      <div className="coverage-summary" onClick={() => setOpen(o => !o)}>
+        <span className="coverage-icon">⚠️</span>
+        <span className="coverage-text">
+          {orphanedSources.length > 0 && `${orphanedSources.length} orphaned source${orphanedSources.length > 1 ? 's' : ''}`}
+          {orphanedSources.length > 0 && unusedDestinations.length > 0 && ' · '}
+          {unusedDestinations.length > 0 && `${unusedDestinations.length} unused destination${unusedDestinations.length > 1 ? 's' : ''}`}
+        </span>
+        <span className={`chevron ${open ? 'expanded' : ''}`}>&#9654;</span>
+      </div>
+      {open && (
+        <div className="coverage-detail">
+          {orphanedSources.length > 0 && (
+            <div className="coverage-group">
+              <span className="detail-label">Sources with no outgoing path:</span>
+              <div className="coverage-chips">
+                {orphanedSources.map(s => <span key={s.id} className="coverage-chip">{s.type}:{s.id}</span>)}
+              </div>
+            </div>
+          )}
+          {unusedDestinations.length > 0 && (
+            <div className="coverage-group">
+              <span className="detail-label">Destinations nothing routes to:</span>
+              <div className="coverage-chips">
+                {unusedDestinations.map(d => <span key={d.id} className="coverage-chip">{d.type}:{d.id}</span>)}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DataPathCard({
   path,
   expanded,
@@ -253,6 +320,7 @@ function DataPathCard({
   metadata,
   pathKey,
   groupId,
+  status,
   onSaveMetadata,
 }: {
   path: DataPath;
@@ -261,10 +329,16 @@ function DataPathCard({
   metadata: DataPathMetadata;
   pathKey: string;
   groupId: string;
+  status?: GroupStatus;
   onSaveMetadata: (key: string, meta: DataPathMetadata) => void;
 }) {
   const displayName = metadata.dataSourceLabel || path.dataType;
   const [showExplorer, setShowExplorer] = useState(false);
+
+  const srcStatus = path.source ? status?.inputs[path.source.id] : undefined;
+  const destStatus = status?.outputs[path.destination.id];
+  const pathHealth = worstHealth(srcStatus?.health, destStatus?.health);
+  const hasStatus = !!srcStatus || !!destStatus;
 
   return (
     <div className={`data-path-card ${path.disabled ? 'disabled-source' : ''}`}>
@@ -285,11 +359,35 @@ function DataPathCard({
           <CriticalityBadge level={metadata.criticality} />
           {path.kind === 'quickconnect' && <span className="quickconnect-badge">QuickConnect</span>}
           {path.disabled && <span className="disabled-badge">Disabled</span>}
+          {hasStatus && <HealthDot health={pathHealth} title={`Source: ${srcStatus?.health ?? 'n/a'} · Destination: ${destStatus?.health ?? 'n/a'}`} />}
           <span className={`chevron ${expanded ? 'expanded' : ''}`}>&#9654;</span>
         </div>
       </div>
       {expanded && (
         <div className="data-path-detail">
+          {hasStatus && (
+            <div className="status-detail">
+              <div className="status-row">
+                <span className="detail-label">Source:</span>
+                {srcStatus ? (
+                  <span><HealthDot health={srcStatus.health} /> {srcStatus.health}</span>
+                ) : <span className="status-na">no status</span>}
+              </div>
+              <div className="status-row">
+                <span className="detail-label">Destination:</span>
+                {destStatus ? (
+                  <span><HealthDot health={destStatus.health} /> {destStatus.health}</span>
+                ) : <span className="status-na">no status</span>}
+              </div>
+              {(srcStatus?.errorMessage || destStatus?.errorMessage) && (
+                <div className="status-row status-error-row">
+                  <span className="detail-label">Error:</span>
+                  <span>{srcStatus?.errorMessage || destStatus?.errorMessage}</span>
+                </div>
+              )}
+            </div>
+          )}
+
           <MetadataEditor pathKey={pathKey} metadata={metadata} onSave={onSaveMetadata} />
 
           {path.route?.description && (
@@ -614,6 +712,8 @@ function App() {
         </div>
       )}
 
+      {selectedGroup && <CoverageBanner dict={selectedGroup} />}
+
       {error && groups.length > 0 && (
         <div className="error-box inline">
           <p>{error}</p>
@@ -650,6 +750,7 @@ function App() {
                       metadata={metadataStore[key] || {}}
                       pathKey={key}
                       groupId={selectedGroup.group.id}
+                      status={selectedGroup.status}
                       onSaveMetadata={handleSaveMetadata}
                     />
                   );

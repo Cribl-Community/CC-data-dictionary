@@ -1,4 +1,4 @@
-import type { WorkerGroup, Source, Destination, RoutesConfig, Pipeline } from './types';
+import type { WorkerGroup, Source, Destination, RoutesConfig, Pipeline, NodeStatus, GroupStatus, Health } from './types';
 
 const getApiUrl = () => window.CRIBL_API_URL || 'http://localhost:9000/api/v1';
 
@@ -48,6 +48,48 @@ export async function fetchRoutes(groupId: string): Promise<RoutesConfig> {
 export async function fetchPipelines(groupId: string): Promise<Pipeline[]> {
   const data = await apiFetch<{ items: Pipeline[] }>(`/m/${groupId}/pipelines`);
   return data.items;
+}
+
+// Raw status item shape from /system/status/{inputs,outputs}.
+interface RawStatusItem {
+  id: string;
+  type?: string;
+  status?: {
+    health?: string;
+    error?: { message?: string };
+  };
+}
+
+function normalizeStatus(item: RawStatusItem): NodeStatus {
+  const rawHealth = item.status?.health;
+  const health: Health =
+    rawHealth === 'Green' || rawHealth === 'Yellow' || rawHealth === 'Red' ? rawHealth : 'Unknown';
+  return {
+    id: item.id,
+    type: item.type,
+    health,
+    errorMessage: item.status?.error?.message,
+  };
+}
+
+async function fetchStatusMap(groupId: string, kind: 'inputs' | 'outputs'): Promise<Record<string, NodeStatus>> {
+  const data = await apiFetch<{ items: RawStatusItem[] }>(`/m/${groupId}/system/status/${kind}`);
+  const map: Record<string, NodeStatus> = {};
+  for (const item of data.items ?? []) {
+    if (item?.id) map[item.id] = normalizeStatus(item);
+  }
+  return map;
+}
+
+// Fetch source + destination status for a group. Status is best-effort: if the
+// endpoints fail (older instance, permissions), callers get empty maps rather
+// than a hard error, so the structural dictionary still renders.
+export async function fetchGroupStatus(groupId: string): Promise<GroupStatus> {
+  const [inputs, outputs] = await Promise.all([
+    fetchStatusMap(groupId, 'inputs').catch(() => ({})),
+    fetchStatusMap(groupId, 'outputs').catch(() => ({})),
+  ]);
+  return { inputs, outputs };
 }
 
 export interface CaptureParams {

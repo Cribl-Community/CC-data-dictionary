@@ -1,5 +1,5 @@
-import type { Source, Destination, RouteEntry, Pipeline, DataPath, GroupDataDictionary, WorkerGroup } from './types';
-import { fetchGroups, fetchSources, fetchDestinations, fetchRoutes, fetchPipelines } from './api';
+import type { Source, Destination, RouteEntry, Pipeline, DataPath, GroupDataDictionary, WorkerGroup, Coverage } from './types';
+import { fetchGroups, fetchSources, fetchDestinations, fetchRoutes, fetchPipelines, fetchGroupStatus } from './api';
 
 // How a route constrains the source __inputId. `eq` is exact match; the others
 // mirror the JS string methods Cribl filters commonly use.
@@ -219,25 +219,50 @@ function buildDataPaths(
   return paths;
 }
 
+// Identify configuration gaps: sources with no outgoing path, and destinations
+// nothing routes to. Computed from the structural data paths we already built.
+function computeCoverage(sources: Source[], destinations: Destination[], dataPaths: DataPath[]): Coverage {
+  const sourcesWithPath = new Set<string>();
+  const destsUsed = new Set<string>();
+  // Content/catch-all routes (kind 'route', no attributed source) can match any
+  // source by filter — we can't statically prove a given source ISN'T caught by
+  // one. If any exist, we can't confidently call any source orphaned, so we only
+  // flag orphans when there are none.
+  let hasContentRoute = false;
+  for (const p of dataPaths) {
+    if (p.source) sourcesWithPath.add(p.source.id);
+    else if (p.kind === 'route') hasContentRoute = true;
+    destsUsed.add(p.destination.id);
+  }
+  return {
+    // A source is orphaned only if nothing references it AND no content route
+    // could plausibly catch it. Avoids false positives from filter-only routes.
+    orphanedSources: hasContentRoute ? [] : sources.filter(s => !sourcesWithPath.has(s.id)),
+    unusedDestinations: destinations.filter(d => !destsUsed.has(d.id)),
+  };
+}
+
 // List the worker groups only. Cheap, and lets the UI render the group
 // picker immediately without fetching every group's full config up front.
 export async function loadGroups(): Promise<WorkerGroup[]> {
   return fetchGroups();
 }
 
-// Load the full data dictionary for a SINGLE group. The four config endpoints
-// are fetched in parallel. Loading one group at a time (on selection) instead
-// of all groups at once keeps the request fan-out small and avoids timeouts on
-// instances with many groups.
+// Load the full data dictionary for a SINGLE group. Config + live status
+// endpoints are fetched in parallel. Loading one group at a time (on selection)
+// instead of all groups at once keeps the request fan-out small and avoids
+// timeouts on instances with many groups.
 export async function loadGroupDataDictionary(group: WorkerGroup): Promise<GroupDataDictionary> {
-  const [sources, destinations, routesConfig, pipelines] = await Promise.all([
+  const [sources, destinations, routesConfig, pipelines, status] = await Promise.all([
     fetchSources(group.id),
     fetchDestinations(group.id),
     fetchRoutes(group.id),
     fetchPipelines(group.id),
+    fetchGroupStatus(group.id),
   ]);
 
   const dataPaths = buildDataPaths(sources, destinations, routesConfig.routes, pipelines);
+  const coverage = computeCoverage(sources, destinations, dataPaths);
 
   return {
     group,
@@ -246,5 +271,7 @@ export async function loadGroupDataDictionary(group: WorkerGroup): Promise<Group
     routes: routesConfig.routes,
     pipelines,
     dataPaths,
+    status,
+    coverage,
   };
 }

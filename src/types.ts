@@ -84,6 +84,33 @@ export interface DataPath {
   disabled: boolean;
 }
 
+// Health of a source or destination, from /system/status/*.
+export type Health = 'Green' | 'Yellow' | 'Red' | 'Unknown';
+
+// Normalized health for one source or destination. (Cribl's status endpoint
+// reports health only; throughput lives in the separate metrics store and is
+// not surfaced here.)
+export interface NodeStatus {
+  id: string;
+  type?: string;
+  health: Health;
+  errorMessage?: string;
+}
+
+// Status maps keyed by source/destination id for a group.
+export interface GroupStatus {
+  inputs: Record<string, NodeStatus>;
+  outputs: Record<string, NodeStatus>;
+}
+
+// Configuration gaps surfaced by coverage analysis.
+export interface Coverage {
+  // Sources with no data path leaving them (no route/QuickConnect matches).
+  orphanedSources: Source[];
+  // Destinations that nothing routes to.
+  unusedDestinations: Destination[];
+}
+
 export interface GroupDataDictionary {
   group: WorkerGroup;
   sources: Source[];
@@ -91,4 +118,6 @@ export interface GroupDataDictionary {
   routes: RouteEntry[];
   pipelines: Pipeline[];
   dataPaths: DataPath[];
+  status: GroupStatus;
+  coverage: Coverage;
 }

@@ -1,73 +1,48 @@
-# React + TypeScript + Vite
+# Data Dictionary
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A Cribl Stream app for **mapping and documenting the data flowing through your deployment** — every source → route → destination path in a worker group, enriched with the fields each path carries and human-authored metadata (owner, criticality, notes). It runs as an app inside a Cribl Stream instance and talks to the Cribl API to discover data paths and sample live events.
 
-Currently, two official plugins are available:
+## Installation
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+1. Log in to Cribl and then click on **Apps->View All**
+2. Click **Add App->Import from Git**.
+3. Paste the repo url and "latest" for the release tag.
+4. Click **Import**.
 
-## React Compiler
+## What it does
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+Understanding what data moves through a Cribl deployment usually means clicking through Routes, Sources, Destinations, and QuickConnect one screen at a time and holding the whole picture in your head. Data Dictionary assembles that picture for you:
 
-## Expanding the ESLint configuration
+1. **Pick a worker group** — choose a group and the app builds its full data dictionary: every path from a source, through the Routes table (or QuickConnect), to a destination.
+2. **Follow the paths** — routes are resolved against source `__inputId` constraints (exact match plus `startsWith` / `endsWith` / `includes` filter predicates) so each destination is tied to the sources that actually reach it. QuickConnect links that bypass the Routes table are surfaced too.
+3. **Explore the fields** — for any path, the **Field Explorer** captures live events at a chosen stage (Before Routes, Before Post-Processing Pipeline, or Before Destination) and analyzes them: field names, observed types, fill rate, and a representative sample value. Cribl-internal `__*` fields are flagged.
+4. **Annotate each path** — attach an **owner**, **criticality** (low / medium / high / critical), a data-source label, and free-form notes. Metadata persists in the Cribl KV store, so it's shared across everyone using the app.
+5. **Group and scan** — view paths grouped by owner, criticality, or destination to quickly find unowned or business-critical flows.
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+### How discovery works
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+Data is loaded lazily per worker group to avoid the platform proxy's 30s request timeout — the app fetches sources, destinations, routes, and pipelines and stitches them into `DataPath`s in [src/dataPathBuilder.ts](src/dataPathBuilder.ts). Field sampling uses Cribl's capture API at a selectable `level`; results are summarized by [src/fieldAnalysis.ts](src/fieldAnalysis.ts). Path metadata is stored in the `data-dictionary/metadata` KV collection ([src/metadata.ts](src/metadata.ts)), keyed by `source::route::destination` so annotations stay attached even as the UI regroups.
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+## Project structure
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+- [src/App.tsx](src/App.tsx) — top-level flow: select group → view data paths → explore fields → annotate
+- [src/api.ts](src/api.ts) — all Cribl API calls (groups, sources, destinations, routes, pipelines, status, event capture) with a 25s timeout guard
+- [src/dataPathBuilder.ts](src/dataPathBuilder.ts) — resolves routes against source `__inputId` constraints and builds the group data dictionary (including QuickConnect paths)
+- [src/fieldAnalysis.ts](src/fieldAnalysis.ts) — summarizes captured events into per-field type / fill-rate / sample stats
+- [src/metadata.ts](src/metadata.ts) — load/save path metadata in the Cribl KV store, keyed by `source::route::destination`
+- [src/types.ts](src/types.ts) — WorkerGroup / Source / Destination / Route / Pipeline / DataPath type definitions
+
+## Development
+
+Clone this repo. Install dependencies and start the app.
+```bash
+npm install
+npm run dev
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+Log into Cribl Cloud, 
+Go to App Platform > Development > Live Preview
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+## License
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+Licensed under the [Apache License 2.0](LICENSE).

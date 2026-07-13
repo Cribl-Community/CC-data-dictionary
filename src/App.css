@@ -699,3 +699,94 @@ body {
 .internal-field .field-name {
   color: #8c8c8c;
 }
+
+/* Health + throughput */
+.health-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+
+.status-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  background: #fafafa;
+  border: 1px solid #f0f0f0;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.status-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.status-na {
+  color: #bfbfbf;
+  font-style: italic;
+}
+
+.status-error-row {
+  color: #cf1322;
+}
+
+/* Coverage banner */
+.coverage-banner {
+  margin-bottom: 16px;
+  background: #fffbe6;
+  border: 1px solid #ffe58f;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.coverage-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.coverage-text {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 600;
+  color: #ad6800;
+}
+
+.coverage-detail {
+  padding: 0 14px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.coverage-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.coverage-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.coverage-chip {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 11px;
+  padding: 2px 8px;
+  background: #fff;
+  border: 1px solid #ffe58f;
+  border-radius: 3px;
+  color: #874d00;
+}
